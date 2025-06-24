@@ -360,3 +360,99 @@
     (ok avatar-id)
   )
 )
+
+;; Update avatar experience and handle level progression
+(define-public (update-avatar-experience
+    (avatar-id uint)
+    (experience-gained uint)
+  )
+  (let (
+      (current-metadata (unwrap! (get-avatar-details avatar-id) ERR-INVALID-AVATAR))
+      (avatar-owner (unwrap! (nft-get-owner? satoshiquest-avatar avatar-id) ERR-INVALID-AVATAR))
+      (current-level (get level current-metadata))
+      (current-experience (get experience current-metadata))
+    )
+    ;; Authorization and validation
+    (asserts! (is-protocol-admin tx-sender) ERR-NOT-AUTHORIZED)
+    (asserts! (<= avatar-id (var-get total-avatars)) ERR-INVALID-AVATAR)
+    (asserts! (> experience-gained u0) ERR-INVALID-INPUT)
+    (asserts! (< current-level MAX-LEVEL) ERR-MAX-LEVEL-REACHED)
+    (asserts!
+      (validate-experience-gain current-experience experience-gained
+        current-level
+      )
+      ERR-MAX-EXPERIENCE-REACHED
+    )
+    ;; Calculate new experience and level
+    (let (
+        (new-experience (+ current-experience experience-gained))
+        (should-level-up (can-level-up current-experience experience-gained current-level))
+        (new-level (if should-level-up
+          (+ current-level u1)
+          current-level
+        ))
+      )
+      (asserts! (or (not should-level-up) (<= new-level MAX-LEVEL))
+        ERR-MAX-LEVEL-REACHED
+      )
+      ;; Update avatar metadata
+      (map-set avatar-metadata { avatar-id: avatar-id }
+        (merge current-metadata {
+          experience: new-experience,
+          level: new-level,
+        })
+      )
+      (ok should-level-up)
+    )
+  )
+)
+
+;; VIRTUAL WORLD MANAGEMENT
+
+;; Create new gaming world
+(define-public (create-game-world
+    (name (string-ascii 50))
+    (description (string-ascii 200))
+    (entry-requirement uint)
+  )
+  (let ((world-id (+ (var-get total-worlds) u1)))
+    ;; Authorization and validation
+    (asserts! (is-protocol-admin tx-sender) ERR-NOT-AUTHORIZED)
+    (asserts! (is-valid-name name) ERR-INVALID-NAME)
+    (asserts! (is-valid-description description) ERR-INVALID-DESCRIPTION)
+    (asserts! (>= entry-requirement u0) ERR-INVALID-INPUT)
+    ;; Create world entry
+    (map-set game-worlds { world-id: world-id } {
+      name: name,
+      description: description,
+      entry-requirement: entry-requirement,
+      active-players: u0,
+      total-rewards: u0,
+    })
+    (var-set total-worlds world-id)
+    (ok world-id)
+  )
+)
+
+;; LEADERBOARD & SCORING SYSTEM
+
+;; Update player's game score
+(define-public (update-player-score
+    (player principal)
+    (new-score uint)
+  )
+  (let ((current-stats (unwrap! (map-get? leaderboard { player: player }) ERR-PLAYER-NOT-FOUND)))
+    ;; Authorization and validation
+    (asserts! (is-protocol-admin tx-sender) ERR-NOT-AUTHORIZED)
+    (asserts! (is-valid-principal player) ERR-INVALID-INPUT)
+    (asserts! (and (>= new-score u0) (<= new-score u10000)) ERR-INVALID-SCORE)
+    ;; Update leaderboard entry
+    (map-set leaderboard { player: player }
+      (merge current-stats {
+        score: new-score,
+        games-played: (+ (get games-played current-stats) u1),
+      })
+    )
+    (ok true)
+  )
+)
