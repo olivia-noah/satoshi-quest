@@ -184,3 +184,83 @@
 (define-read-only (is-protocol-admin (sender principal))
   (default-to false (map-get? protocol-admin-whitelist sender))
 )
+
+;; Validate principal address
+(define-read-only (is-valid-principal (input principal))
+  (and
+    (not (is-eq input tx-sender))
+    (not (is-eq input (as-contract tx-sender)))
+  )
+)
+
+;; Enhanced principal security validation
+(define-read-only (is-safe-principal (input principal))
+  (and
+    (is-valid-principal input)
+    (or
+      (is-protocol-admin input)
+      (is-some (map-get? leaderboard { player: input }))
+    )
+  )
+)
+
+;; Retrieve world information
+(define-read-only (get-world-details (world-id uint))
+  (map-get? game-worlds { world-id: world-id })
+)
+
+;; Retrieve avatar information
+(define-read-only (get-avatar-details (avatar-id uint))
+  (map-get? avatar-metadata { avatar-id: avatar-id })
+)
+
+;; Get top performing players (simplified implementation)
+(define-read-only (get-top-players)
+  (let ((max-entries (var-get max-leaderboard-entries)))
+    (list tx-sender)
+    ;; Placeholder - full implementation would query and sort leaderboard
+  )
+)
+
+;; EXPERIENCE & PROGRESSION SYSTEM
+
+;; Calculate experience required for next level
+(define-read-only (get-next-level-requirement (avatar-id uint))
+  (match (get-avatar-details avatar-id)
+    metadata (ok (calculate-level-up-experience (get level metadata)))
+    ERR-INVALID-AVATAR
+  )
+)
+
+;; Check if avatar can receive additional experience
+(define-read-only (can-receive-experience
+    (avatar-id uint)
+    (experience-amount uint)
+  )
+  (match (get-avatar-details avatar-id)
+    metadata (ok (and
+      (< (get level metadata) MAX-LEVEL)
+      (validate-experience-gain (get experience metadata) experience-amount
+        (get level metadata)
+      )
+    ))
+    ERR-INVALID-AVATAR
+  )
+)
+
+;; PROTOCOL MANAGEMENT FUNCTIONS
+
+;; Initialize SatoshiQuest protocol with configuration
+(define-public (initialize-protocol
+    (entry-fee uint)
+    (max-entries uint)
+  )
+  (begin
+    (asserts! (is-protocol-admin tx-sender) ERR-NOT-AUTHORIZED)
+    (asserts! (and (>= entry-fee u1) (<= entry-fee u1000)) ERR-INVALID-FEE)
+    (asserts! (and (>= max-entries u1) (<= max-entries u500)) ERR-INVALID-ENTRIES)
+    (var-set protocol-fee entry-fee)
+    (var-set max-leaderboard-entries max-entries)
+    (ok true)
+  )
+)
